@@ -1,0 +1,357 @@
+// Author: Ivan Kazmenko (gassa@mail.ru)
+module testlib;
+import core.stdc.stdlib;
+import std.algorithm;
+import std.conv;
+import std.exception;
+import std.format;
+import std.range;
+import std.stdio;
+import std.string;
+import std.traits;
+import std.utf;
+
+File outFileToWrite;
+File logFileToWrite;
+
+enum ExitCode {ok = 0, wa = 1, pe = 2, fail = 3, pcStart = 50};
+
+string exitCodeName (int exitCode)
+{
+	if (exitCode == ExitCode.ok)
+	{
+		return "ok";
+	}
+	else if (exitCode == ExitCode.wa)
+	{
+		return "wrong answer";
+	}
+	else if (exitCode == ExitCode.pe)
+	{
+		return "presentation error";
+	}
+	else if (exitCode == ExitCode.fail)
+	{
+		return "fail";
+	}
+	else if (exitCode >= ExitCode.pcStart)
+	{
+		return format ("partially correct (%s)",
+		    (exitCode - ExitCode.pcStart) / 200.0);
+	}
+	else
+	{
+		assert (false);
+	}
+}
+
+void quit (Args...) (int exitCode, Args args)
+{
+	logFileToWrite.writeln (exitCodeName (exitCode),
+	    Args.length ? " " : "", args);
+	exit (cast (int) exitCode);
+}
+
+File tryOpen (string name, string mode)
+{
+	try
+	{
+		File res = File (name, mode);
+		return res;
+	}
+	catch (Exception e)
+	{
+		quit (ExitCode.pe, e.msg);
+	}
+	assert (false);
+}
+
+bool stringRead (Args...) (Args args)
+{
+	try
+	{
+		formattedRead (args);
+		return true;
+	}
+	catch (Exception e)
+	{
+		return false;
+	}
+	assert (false);
+}
+
+string shorten (T) (T value, int maxPartLength = 10)
+{
+	auto res = value.text;
+	if (res.length > maxPartLength * 2)
+	{
+		res = res[0..maxPartLength] ~ "..." ~
+		    res[$ - maxPartLength..$];
+	}
+	return res;
+}
+
+class InputFileStream
+{
+	version (Windows)
+	{
+		enum newLineEncoded = "\r\n";
+	}
+	else
+	{
+		enum newLineEncoded = "\n";
+	}
+	static immutable char newLineChar = '\n';
+
+	File file;
+	bool wrongIsFail;
+	bool validateBlanks;
+
+	void initThis (bool wrongIsFail_, bool validateBlanks_)
+	{
+		version (Windows)
+		{
+			_setmode (file.fileno, _O_BINARY);
+			version (CRuntime_DigitalMars) // recipe from:
+			{ // https://issues.dlang.org/show_bug.cgi?id=4243
+				import core.atomic : atomicOp;
+				atomicOp !("&=")
+				    (__fhnd_info[file.fileno], ~FHND_TEXT);
+			}
+		}
+		wrongIsFail = wrongIsFail_;
+		validateBlanks = validateBlanks_;
+	}
+
+	this (File file_, bool wrongIsFail_, bool validateBlanks_)
+	{
+		file = file_;
+		initThis (wrongIsFail_, validateBlanks_);
+	}
+
+	this (string name, bool wrongIsFail_, bool validateBlanks_)
+	{
+		file = tryOpen (name, "rt");
+		initThis (wrongIsFail_, validateBlanks_);
+	}
+
+	~this ()
+	{
+		file.close ();
+	}
+
+	void quit (Args...) (int exitCode, Args args)
+	{
+		if (wrongIsFail && exitCode != ExitCode.ok &&
+		    exitCode < ExitCode.pcStart)
+		{
+			exitCode = ExitCode.fail;
+		}
+		.quit (exitCode, args);
+	}
+
+	void skip (string s)
+	{
+		foreach (i, dchar cCur; s)
+		{
+			void checkChar (dchar cCheck)
+			{
+				dchar cActual;
+				file.readf ("%s", &cActual);
+				if (cCheck != cActual)
+				{
+					quit (ExitCode.pe,
+					    "can not skip character ", i,
+					    " of string `", s, "`");
+				}
+			}
+
+			if (cCur == newLineChar)
+			{
+				foreach (dchar cCurInner; newLineEncoded)
+				{
+					checkChar (cCurInner);
+				}
+			}
+			else
+			{
+				checkChar (cCur);
+			}
+		}
+	}
+
+	void checkEof ()
+	{
+		if (!validateBlanks)
+		{
+			file.readf (" ");
+		}
+		dchar afterEnd;
+		auto num = file.readf ("%s", &afterEnd);
+		if (num > 0)
+		{
+			quit (ExitCode.pe,
+			    "got character `", afterEnd,
+			    "` instead of end-of-file");
+		}
+	}
+
+	T readFree (T, Args...) (lazy Args args)
+	    if (isIntegral !(T))
+	{
+		if (!validateBlanks)
+		{
+			file.readf (" ");
+		}
+		T value;
+		try
+		{
+			auto num = file.readf ("%d", &value);
+			if (num != 1)
+			{
+				quit (ExitCode.pe, "failed to read " ~
+				    "an integer value",
+				    ["", ": "][args.length > 0], args);
+			}
+		}
+		catch (Exception e)
+		{
+			quit (ExitCode.pe, "got exception: `", e.msg,
+			    "` while reading",
+			    ["", ": "][args.length > 0], args);
+		}
+		return value;
+	}
+
+	T read (T, Args...) (T lo, T hi, lazy Args args)
+	    if (isIntegral !(T))
+	{
+		auto value = readFree !(T) ();
+		if (!(lo <= value && value <= hi))
+		{
+			quit (ExitCode.wa, value,
+			    " not in [", lo, "-", hi, "]",
+			    ["", ": "][args.length > 0], args);
+		}
+		return value;
+	}
+
+	string readln ()
+	{
+		string res;
+		try
+		{
+			res = file.readln ();
+			validate (res);
+		}
+		catch (Exception e)
+		{
+			quit (ExitCode.pe, "got exception: `", e.msg,
+			    "` in readln");
+		}
+		if (validateBlanks && !res.endsWith (newLineEncoded))
+		{
+			quit (ExitCode.pe, "no newline at end of string");
+		}
+		while (!res.empty &&
+		    (res[$ - 1] == '\r' || res[$ - 1] == '\n'))
+		{
+			res = res[0..$ - 1];
+		}
+		return res;
+	}
+
+	string readln () (string pattern)
+	{ // templated, so that not using it = compiling faster
+		import std.regex : matchAll, regex;
+		string res = readln ();
+		if (!matchAll (res, regex ("^" ~ pattern ~ "$")))
+		{
+			quit (ExitCode.pe, "string `", res,
+			    "` does not match pattern `", pattern, "`");
+		}
+		return res;
+	}
+
+	auto byToken ()
+	{
+		return file.byLine.map !(splitter).joiner;
+	}
+}
+
+InputFileStream inFile;
+InputFileStream outFile;
+InputFileStream ansFile;
+
+enum TestlibRole {validator, checker, interactor, channel};
+
+void initTestlib (TestlibRole role) (string [] args)
+{
+	// Polygon compatibility
+	while (args.length > 1 && ["--testset", "--group",
+	    "--testOverviewLogFileName"].canFind (args[1]))
+	{
+		args = args[0] ~ args[3..$];
+	}
+
+	logFileToWrite = stdout;
+
+	static if (role == TestlibRole.validator)
+	{
+		enforce (args.length > 0, "validator usage: " ~
+		    "<program> [infile]");
+	}
+	else static if (role == TestlibRole.checker)
+	{
+		enforce (args.length > 2, "checker usage: " ~
+		    "<program> infile outfile [ansfile [logfile]]");
+	}
+	else static if (role == TestlibRole.interactor)
+	{
+		enforce (args.length > 1, "interactor usage: " ~
+		    "<program> infile [outfile [ansfile [logfile]]]");
+	}
+	else static if (role == TestlibRole.channel)
+	{
+		enforce (args.length > 1, "channel usage: " ~
+		    "<program> infile [outfile [ansfile [logfile]]]");
+	}
+	else static assert (false);
+
+	if (args.length > 4)
+	{
+		auto logFileName = args[4];
+		logFileToWrite = tryOpen (logFileName, "wt");
+	}
+	if (args.length > 1)
+	{
+		auto inFileName = args[1];
+		inFile = new InputFileStream (inFileName, true,
+		    role == TestlibRole.validator);
+	}
+	else
+	{
+		inFile = new InputFileStream (stdin, true,
+		    role == TestlibRole.validator);
+	}
+	if (args.length > 2)
+	{
+		auto outFileName = args[2];
+		static if (role == TestlibRole.interactor ||
+		    role == TestlibRole.channel)
+		{
+			outFileToWrite = tryOpen (outFileName, "wt");
+			outFile = new InputFileStream (stdin, false, false);
+		}
+		else
+		{
+			outFile = new InputFileStream
+			    (outFileName, false, false);
+		}
+	}
+	if (args.length > 3)
+	{
+		auto ansFileName = args[3];
+		ansFile = new InputFileStream (ansFileName, true, false);
+	}
+}
