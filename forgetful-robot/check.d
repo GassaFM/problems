@@ -3,8 +3,6 @@
 module check;
 import testlib;
 
-pragma (lib, "testlib");
-
 void main (string [] args)
 {
 	initTestlib !(TestlibRole.checker) (args);

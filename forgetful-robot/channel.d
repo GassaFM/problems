@@ -3,8 +3,6 @@
 module channel;
 import testlib;
 
-pragma (lib, "testlib");
-
 immutable int minV =    1;
 immutable int maxV = 1000;
 

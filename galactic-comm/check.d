@@ -4,8 +4,6 @@ module check;
 import std.algorithm;
 import testlib;
 
-pragma (lib, "testlib");
-
 immutable int minN       =      1;
 immutable int maxN       = 10_000;
 immutable int messageLen =     30;
