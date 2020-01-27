@@ -14,7 +14,17 @@ import std.utf;
 File outFileToWrite;
 File logFileToWrite;
 
-enum ExitCode {ok = 0, wa = 1, pe = 2, fail = 3, pcStart = 50};
+version (ejudge)
+{
+	enum ExitCode {ok = 0, wa = 5, pe = 4, fail = 6,
+	    points = 7, pcStart = 50};
+}
+else
+{
+	enum ExitCode {ok = 0, wa = 1, pe = 2, fail = 3,
+	    points = 7, pcStart = 50};
+}
+bool outputXml;
 
 string exitCodeName (int exitCode)
 {
@@ -34,6 +44,10 @@ string exitCodeName (int exitCode)
 	{
 		return "fail";
 	}
+	else if (exitCode == ExitCode.points)
+	{
+		return "points";
+	}
 	else if (exitCode >= ExitCode.pcStart)
 	{
 		return format ("partially correct (%s)",
@@ -45,11 +59,46 @@ string exitCodeName (int exitCode)
 	}
 }
 
+void quitImpl (Args...) (int exitCode, string pointsText, Args args)
+{
+	if (outputXml)
+	{
+		logFileToWrite.writeln
+		    ("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+		if (pointsText != "")
+		{
+			pointsText = format (" points = \"%s\"", pointsText);
+		}
+		logFileToWrite.writefln ("<result outcome = \"%s\"%s>",
+		    exitCodeName (exitCode), pointsText);
+		if (Args.length > 0)
+		{
+			logFileToWrite.writeln (args);
+		}
+		logFileToWrite.writeln ("</result>");
+	}
+	else
+	{
+		logFileToWrite.writeln (exitCodeName (exitCode),
+		    pointsText == "" ? "" : " " ~ pointsText,
+		    Args.length ? " " : "", args);
+	}
+	exit (cast (int) exitCode);
+}
+
 void quit (Args...) (int exitCode, Args args)
 {
-	logFileToWrite.writeln (exitCodeName (exitCode),
-	    Args.length ? " " : "", args);
-	exit (cast (int) exitCode);
+	quitImpl (exitCode, "", args);
+}
+
+void quitPoints (Args...) (int exitCode, real points, Args args)
+{
+	auto pointsText = format ("%.10f", points).stripRight ("0");
+	if (pointsText.back == '.')
+	{
+		pointsText ~= '0';
+	}
+	quitImpl (exitCode, pointsText, args);
 }
 
 File tryOpen (string name, string mode)
@@ -160,51 +209,76 @@ class InputFileStream
 				file.readf ("%s", &cActual);
 				if (cCheck != cActual)
 				{
-					writeln (cCheck.to!int, " ",
-					    cActual.to!int);
 					quit (ExitCode.pe,
 					    "can not skip character ", i,
-					    " of string `", s, "'");
+					    " of string `", s, "`");
 				}
 			}
 
-			if (cCur == newLineChar)
+			try
 			{
-				foreach (dchar cCurInner; newLineEncoded)
+				if (cCur == newLineChar)
 				{
-					checkChar (cCurInner);
+					foreach (dchar cCurInner;
+					    newLineEncoded)
+					{
+						checkChar (cCurInner);
+					}
+				}
+				else
+				{
+					checkChar (cCur);
 				}
 			}
-			else
+			catch (Exception e)
 			{
-				checkChar (cCur);
+				quit (ExitCode.pe, "got exception in skip: ",
+				    e.msg);
 			}
+		}
+	}
+
+	void skipBlanks ()
+	{
+		try
+		{
+			if (!validateBlanks)
+			{
+				file.readf (" ");
+			}
+		}
+		catch (Exception e)
+		{
+			quit (ExitCode.pe, "got exception in skipBlanks: ",
+			    e.msg);
 		}
 	}
 
 	void checkEof ()
 	{
-		if (!validateBlanks)
-		{
-			file.readf (" ");
-		}
+		skipBlanks ();
 		dchar afterEnd;
-		auto num = file.readf ("%s", &afterEnd);
-		if (num > 0)
+		try
 		{
-			quit (ExitCode.pe,
-			    "got character `", afterEnd,
-			    "' instead of end-of-file");
+			auto num = file.readf ("%s", &afterEnd);
+			if (num > 0)
+			{
+				quit (ExitCode.pe,
+				    "got character `", afterEnd,
+				    "` instead of end-of-file");
+			}
+		}
+		catch (Exception e)
+		{
+			quit (ExitCode.pe, "got exception in checkEof: ",
+			    e.msg);
 		}
 	}
 
 	T readFree (T, Args...) (lazy Args args)
 	    if (isIntegral !(T))
 	{
-		if (!validateBlanks)
-		{
-			file.readf (" ");
-		}
+		skipBlanks ();
 		T value;
 		try
 		{
@@ -219,7 +293,7 @@ class InputFileStream
 		catch (Exception e)
 		{
 			quit (ExitCode.pe, "got exception: `", e.msg,
-			    "' while reading",
+			    "` while reading",
 			    ["", ": "][args.length > 0], args);
 		}
 		return value;
@@ -249,9 +323,10 @@ class InputFileStream
 		catch (Exception e)
 		{
 			quit (ExitCode.pe, "got exception: `", e.msg,
-			    "' in readln");
+			    "` in readln");
 		}
-		if (validateBlanks && !res.endsWith (newLineEncoded))
+		if (validateBlanks && res !is null &&
+		    !res.endsWith (newLineEncoded))
 		{
 			quit (ExitCode.pe, "no newline at end of string");
 		}
@@ -270,7 +345,7 @@ class InputFileStream
 		if (!matchAll (res, regex ("^" ~ pattern ~ "$")))
 		{
 			quit (ExitCode.pe, "string `", res,
-			    "' does not match pattern `", pattern, "'");
+			    "` does not match pattern `", pattern, "`");
 		}
 		return res;
 	}
@@ -278,6 +353,38 @@ class InputFileStream
 	auto byToken ()
 	{
 		return file.byLine.map !(splitter).joiner;
+	}
+
+	auto byLine ()
+	{
+		return new Lines (this);
+	}
+}
+
+class Lines
+{
+	string currentLine;
+	InputFileStream file;
+
+	bool empty () const
+	{
+		return currentLine is null;
+	}
+
+	string front () const
+	{
+		return currentLine;
+	}
+
+	void popFront ()
+	{
+		currentLine = file.readln ();
+	}
+
+	this (InputFileStream file_)
+	{
+		file = file_;
+		popFront ();
 	}
 }
 
@@ -289,6 +396,13 @@ enum TestlibRole {validator, checker, interactor, channel};
 
 void initTestlib (TestlibRole role) (string [] args)
 {
+	// Polygon compatibility
+	while (args.length > 1 && ["--testset", "--group",
+	    "--testOverviewLogFileName"].canFind (args[1]))
+	{
+		args = args[0] ~ args[3..$];
+	}
+
 	logFileToWrite = stdout;
 
 	static if (role == TestlibRole.validator)
@@ -313,11 +427,29 @@ void initTestlib (TestlibRole role) (string [] args)
 	}
 	else static assert (false);
 
+	if (args.length > 5)
+	{
+		if (args[5].toLower == "-appes")
+		{
+			outputXml = true;
+		}
+	}
+
 	if (args.length > 4)
 	{
 		auto logFileName = args[4];
 		logFileToWrite = tryOpen (logFileName, "wt");
 	}
+	else
+	{
+		// compatibility with Yandex.Contest and EJudge
+		static if (role == TestlibRole.interactor ||
+		    role == TestlibRole.channel)
+		{
+			logFileToWrite = stderr;
+		}
+	}
+
 	if (args.length > 1)
 	{
 		auto inFileName = args[1];
@@ -344,9 +476,16 @@ void initTestlib (TestlibRole role) (string [] args)
 			    (outFileName, false, false);
 		}
 	}
-	if (args.length > 3)
+	// compatibility: for now, Yandex.Algorithm and EJudge
+	// don't allow reading answer file from interactor
+//	static if ((role != TestlibRole.interactor) &&
+//	    (role != TestlibRole.channel))
 	{
-		auto ansFileName = args[3];
-		ansFile = new InputFileStream (ansFileName, true, false);
+		if (args.length > 3)
+		{
+			auto ansFileName = args[3];
+			ansFile = new InputFileStream
+			    (ansFileName, true, false);
+		}
 	}
 }
