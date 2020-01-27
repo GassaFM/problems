@@ -1,0 +1,95 @@
+\gdef\thisproblemorigin{180429p, practice session}
+\gdef\thisproblemauthor{Ivan Kazmenko}
+\gdef\thisproblemdeveloper{Ivan Kazmenko}
+\begin{problem}{Forgetful Robot}
+%{forgetful-robot.in}{forgetful-robot.out}
+{\textsl{standard input}}{\textsl{standard output}}
+{2 seconds}{512 mebibytes}{}
+
+Alice wants to send Bob an integer $a$ from $1$ to $10$.
+Carl the Robot is helping them do the transfer.
+
+Alice says to Carl some integer $x$ from $1$ to $1000$,
+and then Carl goes to Bob and has to repeat that integer.
+Unfortunately, Carl tends to forget stuff, so he remembers $x$
+only approximately.
+As a result, when the robot gets to Bob, he may remember the exact value
+of $x$, but may also introduce an off-by one error, and give Bob
+$x - 1$ or $x + 1$ instead of $x$.
+
+Alice and Bob want to agree in advance how to transfer numbers
+so that Bob will always be able to restore the exact value of Alice's
+integer $a$, regardless of whether Carl introduces an error.
+Write a program that will implement such an agreement.
+
+\Interaction
+
+In this problem, your solution will be run twice on each test.
+
+The first run models communication between Alice and Carl.
+The only line of input will have the form
+``\texttt{Alice~$a$}'', where $a$ is an integer from $1$ to $10$
+that Alice wants to give to Bob.
+Your program has to print an integer $x$ from $1$ to $1000$:
+the number that Alice tells to Carl.
+After that, terminate your program gracefully.
+
+The second run models communication between Carl and Bob.
+The only line of input will have the form
+``\texttt{Carl~$y$}'', where $y$ is an integer from $x - 1$ to $x + 1$:
+the number that Carl tells to Bob.
+Your program has to print an integer $a$: the number that Alice
+was initially going to transfer.
+After that, terminate your program gracefully.
+
+Please note: during the second run, your solution only gets the integer $y$,
+it knows neither $a$ nor $x$.
+
+In each test, the number $a$ is fixed in advance,
+as well as Carl's behavior depending on the number given to him.
+
+\Examples
+
+\begin{example}
+\exmp{%
+Alice 3
+}{%
+392
+}%
+\exmp{%
+Carl 392
+}{%
+3
+}%
+\exmp{%
+Carl 391
+}{%
+3
+}%
+\exmp{%
+Carl 393
+}{%
+3
+}%
+\end{example}
+
+\Explanations
+
+In the solution shown in the examples, Alice and Bob agreed as follows:
+when $a = 3$, Alice will say $x = 392$ to Carl,
+and then, if $391 \le y \le 393$, Bob will know that $a$ was equal to $3$.
+The first example shows the first run of such solution when $a = 3$.
+
+The next three examples correspond to the first three tests
+in the testing system.
+They show the second run with $a = 3$ and different behaviors for Carl.
+In the first case, Carl remembers the number clearly without modification,
+in the second case, he decreases the number by one,
+and in the third case, he increases it by one.
+
+Sure enough, in your solution, Alice and Bob can agree
+to do something else entirely, so, generally,
+your solution is not required to have these exact answers
+in the same circumstances.
+
+\end{problem}
